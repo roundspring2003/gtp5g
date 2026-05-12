@@ -42,14 +42,65 @@ enum msg_type {
 static void gtp5g_encap_disable_locked(struct sock *);
 static int gtp5g_encap_recv(struct sock *, struct sk_buff *);
 static int gtp1u_udp_encap_recv(struct gtp5g_dev *, struct sk_buff *);
-static int gtp5g_rx(struct pdr *, struct sk_buff *, unsigned int, unsigned int, u64 *);
+static int gtp5g_rx(struct pdr *, struct sk_buff *, unsigned int, unsigned int, u32, u8, u64 *);
 static int gtp5g_fwd_skb_encap(struct sk_buff *, struct net_device *,
-        unsigned int, struct pdr *, struct far *, u64 *);
+        unsigned int, struct pdr *, struct far *, u32, u8, u64 *);
 static int netlink_send(struct pdr *, struct far *, struct sk_buff *, struct net *, struct usage_report *, u32);
 static int unix_sock_send(struct pdr *, struct far *, void *, u32, u32);
 static int gtp5g_fwd_skb_ipv4(struct sk_buff *, 
     struct net_device *, struct gtp5g_pktinfo *, 
     struct pdr *, struct far *);
+
+static u8 gtp5g_pdu_session_qfi(const ext_pdu_sess_ctr_t *pdu_sess)
+{
+    u8 type = pdu_sess->pdu_sess_ctr.type_spare & 0xf0;
+
+    switch (type) {
+    case PDU_SESSION_INFO_TYPE0:
+        return pdu_sess->pdu_sess_ctr.u.dl.ppp_rqi_qfi & 0x3f;
+    case PDU_SESSION_INFO_TYPE1:
+        return pdu_sess->pdu_sess_ctr.u.ul.spare_qfi & 0x3f;
+    default:
+        return 0;
+    }
+}
+
+static void gtp5g_ul_skb_label(u32 teid, u8 qfi, u8 *priority, u32 *mark)
+{
+    *priority = 0;
+    *mark = 0;
+
+    switch (ntohl(teid)) {
+    case 2:
+        if (qfi == 1) {
+            *priority = 1;
+            *mark = 0x109;
+        }
+        break;
+    case 6:
+        if (qfi == 1) {
+            *priority = 3;
+            *mark = 0x208;
+        }
+        break;
+    }
+}
+
+static void gtp5g_apply_ul_skb_label(struct sk_buff *skb, u32 teid, u8 qfi)
+{
+    u8 priority;
+    u32 mark;
+
+    gtp5g_ul_skb_label(teid, qfi, &priority, &mark);
+
+    skb->priority = priority;
+    skb->mark = mark;
+
+    // printk(KERN_INFO "gtp5g: teid=%u qfi=%u priority=%u mark=0x%x\n",
+    //     ntohl(teid), qfi, priority, mark);
+    // printk(KERN_INFO "after:  skb->priority=%u skb->mark=0x%x\n",
+    //     skb->priority, skb->mark);
+}
 
 /* When gtp5g newlink, establish the udp tunnel used in N3 interface */
 struct sock *gtp5g_encap_enable(int fd, int type, struct gtp5g_dev *gtp){
@@ -251,10 +302,11 @@ static int gtp1u_udp_encap_recv(struct gtp5g_dev *gtp, struct sk_buff *skb)
 {
     unsigned int hdrlen = sizeof(struct udphdr) + sizeof(struct gtpv1_hdr);
     struct gtpv1_hdr *gtpv1;
-    struct pdr *pdr;
+    struct pdr *pdr = NULL;
     unsigned int pull_len = hdrlen;
     u8 gtp_type;
     u32 teid;
+    u8 qfi = 0;
     int rt = 0;
     u64 rxVol = skb->len - sizeof(struct udphdr); // exclude UDP header of GTP packet
     /* Captured by the forwarding path while the skb is still owned by us.
@@ -320,6 +372,8 @@ static int gtp1u_udp_encap_recv(struct gtp5g_dev *gtp, struct sk_buff *skb)
         while (*(ext_hdr = (u8 *)(skb->data + hdrlen - 1))) {
             u8 ext_hdr_type = *ext_hdr;
             unsigned int extlen;
+            unsigned int ext_hdr_offset;
+            u8 *ext_hdr_data;
             pull_len = hdrlen + 1; // 1 byte for the length of extension hdr
             if (!pskb_may_pull(skb, pull_len)) {
                 GTP5G_ERR(gtp->dev, "Failed to pull skb length %#x\n", pull_len);
@@ -332,6 +386,7 @@ static int gtp1u_udp_encap_recv(struct gtp5g_dev *gtp, struct sk_buff *skb)
                 rt = PKT_DROPPED;
                 goto end;
             }
+            ext_hdr_offset = hdrlen;
             hdrlen += extlen;
             pull_len = hdrlen;
             if (!pskb_may_pull(skb, pull_len)) {
@@ -339,17 +394,19 @@ static int gtp1u_udp_encap_recv(struct gtp5g_dev *gtp, struct sk_buff *skb)
                 rt = PKT_DROPPED;
                 goto end;
             }
+            ext_hdr_data = skb->data + ext_hdr_offset;
             switch (ext_hdr_type) {
                 case GTPV1_NEXT_EXT_HDR_TYPE_85:
                 {
-                    // ext_pdu_sess_ctr_t *etype85 = (ext_pdu_sess_ctr_t *) (skb->data + hdrlen);
-                    // pdu_sess_ctr_t *pdu_sess_info = &etype85->pdu_sess_ctr;
+                    ext_pdu_sess_ctr_t *etype85 = (ext_pdu_sess_ctr_t *)ext_hdr_data;
 
                     // Commented the below code due to support N9 packet downlink
                     // if (pdu_sess_info->type_spare == PDU_SESSION_INFO_TYPE0)
                     //     return -1;
 
                     //TODO: validate pdu_sess_ctr
+                    if (extlen >= sizeof(*etype85))
+                        qfi = gtp5g_pdu_session_qfi(etype85);
                     break;
                 }
             }
@@ -363,7 +420,7 @@ static int gtp1u_udp_encap_recv(struct gtp5g_dev *gtp, struct sk_buff *skb)
         goto end;
     }
 
-    rt = gtp5g_rx(pdr, skb, hdrlen, gtp->role, &txVol);
+    rt = gtp5g_rx(pdr, skb, hdrlen, gtp->role, teid, qfi, &txVol);
 
 end:
     if (pdr && pdr->pdi) {
@@ -795,7 +852,8 @@ err1:
 }
 
 static int gtp5g_rx(struct pdr *pdr, struct sk_buff *skb,
-    unsigned int hdrlen, unsigned int role, u64 *txVol)
+    unsigned int hdrlen, unsigned int role, u32 teid, u8 qfi,
+    u64 *txVol)
 {
     int rt = -1;
     struct far *far = rcu_dereference(pdr->far);
@@ -820,7 +878,8 @@ static int gtp5g_rx(struct pdr *pdr, struct sk_buff *skb,
                 GTP5G_TRC(pdr->dev, "QER UL gate is closed, drop the packet");
                 return PKT_DROPPED;
             }
-            rt = gtp5g_fwd_skb_encap(skb, pdr->dev, hdrlen, pdr, far, txVol);
+            rt = gtp5g_fwd_skb_encap(skb, pdr->dev, hdrlen, pdr, far,
+                    teid, qfi, txVol);
             break;
         case FAR_ACTION_BUFF:
             rt = gtp5g_buf_skb_encap(skb, pdr->dev, hdrlen, pdr, far, txVol);
@@ -841,7 +900,8 @@ out:
 }
 
 static int gtp5g_fwd_skb_encap(struct sk_buff *skb, struct net_device *dev,
-    unsigned int hdrlen, struct pdr *pdr, struct far *far, u64 *txVol)
+    unsigned int hdrlen, struct pdr *pdr, struct far *far, u32 teid, u8 qfi,
+    u64 *txVol)
 {
     struct forwarding_parameter *fwd_param = rcu_dereference(far->fwd_param);
     struct outer_header_creation *hdr_creation;
@@ -965,6 +1025,7 @@ static int gtp5g_fwd_skb_encap(struct sk_buff *skb, struct net_device *dev,
     skb_reset_network_header(skb);
 
     skb->dev = dev;
+    gtp5g_apply_ul_skb_label(skb, teid, qfi);
 
     stats = this_cpu_ptr(skb->dev->tstats);
     u64_stats_update_begin(&stats->syncp);
