@@ -320,15 +320,21 @@ int find_qer_id_in_pdr(struct pdr *pdr, u32 qer_id)
 static void set_pdr_qfi(struct pdr *pdr, struct gtp5g_dev *gtp){
     int i;
     struct qer *qer;
+    u8 fallback_qfi = 0;
 
     // TS 38.415 QFI range {0..2^6-1}
     for (i = 0; i < pdr->qer_num; i++) {
         qer = find_qer_by_id(gtp, pdr->seid, pdr->qer_ids[i]);
         if (qer && qer->qfi > 0) {
-            pdr->qfi = qer->qfi;
-            break;
+            if (!fallback_qfi)
+                fallback_qfi = qer->qfi;
+            if (qer->qfi != 1) {
+                pdr->qfi = qer->qfi;
+                return;
+            }
         }
     }
+    pdr->qfi = fallback_qfi;
 }
 
 static int set_pdr_qer_ids(struct pdr *pdr, u32 qer_id)
