@@ -260,6 +260,8 @@ void gtp5g_fwd_emark_skb_ipv4(struct sk_buff *skb,
 void gtp5g_xmit_skb_ipv4(struct sk_buff *skb, struct gtp5g_pktinfo *pktinfo)
 {
     u8 tos = 0;
+    bool xnet = !net_eq(sock_net(pktinfo->sk), dev_net(pktinfo->dev));
+
     if (pktinfo->hdr_creation == NULL) {
         tos = pktinfo->iph->tos;
     } else {
@@ -275,7 +277,7 @@ void gtp5g_xmit_skb_ipv4(struct sk_buff *skb, struct gtp5g_pktinfo *pktinfo)
         0,
         pktinfo->gtph_port, 
         pktinfo->gtph_port,
-        true, 
+        xnet,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6,17,0)
         true,
         0);

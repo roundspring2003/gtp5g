@@ -65,39 +65,30 @@ static u8 gtp5g_pdu_session_qfi(const ext_pdu_sess_ctr_t *pdu_sess)
     }
 }
 
-static void gtp5g_ul_skb_label(u32 teid, u8 qfi, u8 *priority, u32 *mark)
+static void gtp5g_skb_label(u8 qfi, u32 *priority, u32 *mark)
 {
-    *priority = 0;
-    *mark = 0;
-
-    switch (ntohl(teid)) {
-    case 2:
-        if (qfi == 1) {
-            *priority = 1;
-            *mark = 0x109;
-        }
-        break;
-    case 6:
-        if (qfi == 1) {
-            *priority = 3;
-            *mark = 0x208;
-        }
-        break;
+    if (!qfi) {
+        *priority = 0;
+        *mark = 0;
+        return;
     }
+
+    *priority = qfi;
+    *mark = qfi;
 }
 
-static void gtp5g_apply_ul_skb_label(struct sk_buff *skb, u32 teid, u8 qfi)
+static void gtp5g_apply_skb_label(struct sk_buff *skb, u8 qfi)
 {
-    u8 priority;
+    u32 priority;
     u32 mark;
 
-    gtp5g_ul_skb_label(teid, qfi, &priority, &mark);
+    gtp5g_skb_label(qfi, &priority, &mark);
 
     skb->priority = priority;
     skb->mark = mark;
 
-    // printk(KERN_INFO "gtp5g: teid=%u qfi=%u priority=%u mark=0x%x\n",
-    //     ntohl(teid), qfi, priority, mark);
+    printk(KERN_INFO "gtp5g: qfi=%u priority=%u mark=0x%x ",
+        qfi, priority, mark);
     // printk(KERN_INFO "after:  skb->priority=%u skb->mark=0x%x\n",
     //     skb->priority, skb->mark);
 }
@@ -1025,7 +1016,7 @@ static int gtp5g_fwd_skb_encap(struct sk_buff *skb, struct net_device *dev,
     skb_reset_network_header(skb);
 
     skb->dev = dev;
-    gtp5g_apply_ul_skb_label(skb, teid, qfi);
+    gtp5g_apply_skb_label(skb, pdr->qfi ? pdr->qfi : qfi);
 
     stats = this_cpu_ptr(skb->dev->tstats);
     u64_stats_update_begin(&stats->syncp);
@@ -1164,7 +1155,14 @@ static int gtp5g_fwd_skb_ipv4(struct sk_buff *skb,
         volume = volume_mbqe;
     }
 
+    // gtp5g_apply_skb_label(skb, pdr->qfi);
     gtp5g_push_header(skb, pktinfo);
+    gtp5g_apply_skb_label(skb, pdr->qfi);
+    printk(KERN_INFO
+        "src=%pI4 dst=%pI4 pdr_id=%u\n",
+        &iph->saddr,
+        &iph->daddr,
+        pdr->id);
 
     if (pdr->urr_num != 0) {
         if (update_urr_counter_and_send_report(pdr, far, volume, volume_mbqe) < 0)
