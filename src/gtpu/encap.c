@@ -712,10 +712,8 @@ int update_urr_counter_and_send_report(struct pdr *pdr, struct far *far, u64 vol
                         triggers[report_num] = USAR_TRIGGER_VOLTH;
                         urrs[report_num++] = urr;
                     }
-                } else {
-                    if (urr->period == 0) {
-                        continue;
-                    }
+                }
+                if (urr->period != 0) {
                     update_period_vol_counter(urr, volume, uplink, mnop);
                 }
                 if (urr->trigger & URR_RPT_TRIGGER_VOLQU) {
