@@ -463,6 +463,11 @@ static int pdr_fill(struct pdr *pdr, struct gtp5g_dev *gtp, struct genl_info *in
         return -EINVAL;
 
     pdr->af = AF_INET;
+
+    if (!pdr->far_id) {
+        return -EINVAL;
+    }
+
     far = find_far_by_id(gtp, pdr->seid, *pdr->far_id);
     if (!far) {
         return -EINVAL;
