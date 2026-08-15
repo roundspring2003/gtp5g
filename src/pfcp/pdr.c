@@ -39,11 +39,16 @@ static void pdr_context_free(struct rcu_head *head)
     struct pdr *pdr = container_of(head, struct pdr, rcu_head);
     struct pdi *pdi;
     struct sdf_filter *sdf;
+    struct flow_qos_binding *flow_qos;
 
     if (!pdr)
         return;
 
     sock_put(pdr->sk);
+
+    flow_qos = rcu_dereference_protected(pdr->flow_qos, 1);
+    if (flow_qos)
+        kfree(flow_qos);
 
     if (pdr->outer_header_removal)
         kfree(pdr->outer_header_removal);

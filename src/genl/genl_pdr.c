@@ -11,6 +11,7 @@
 #include "genl_pdr.h"
 #include "pdr.h"
 #include "api_version.h"
+#include "gtp5g_mark.h"
 
 #include <linux/rculist.h>
 #include <net/netns/generic.h>
@@ -21,6 +22,7 @@
 
 static int pdr_fill(struct pdr *, struct gtp5g_dev *, struct genl_info *);
 static int parse_pdi(struct pdr *, struct nlattr *);
+static int parse_flow_qos(struct pdr *, struct nlattr *);
 static int parse_f_teid(struct pdi *, struct nlattr *);
 static int parse_sdf_filter(struct pdi *, struct nlattr *);
 static int parse_ip_filter_rule(struct sdf_filter *, struct nlattr *);
@@ -395,6 +397,76 @@ static int set_pdr_urr_ids(struct pdr *pdr, u32 urr_id)
     return 0;
 }
 
+static const struct nla_policy flow_qos_policy[GTP5G_FLOW_QOS_ATTR_MAX + 1] = {
+    [GTP5G_FLOW_QOS_VERSION] = { .type = NLA_U8 },
+    [GTP5G_FLOW_QOS_POLICY_ID] = { .type = NLA_U32 },
+    [GTP5G_FLOW_QOS_TC_CLASSID] = { .type = NLA_U32 },
+    [GTP5G_FLOW_QOS_FLAGS] = { .type = NLA_U8 },
+    [GTP5G_FLOW_QOS_GENERATION] = { .type = NLA_U32 },
+};
+
+static int parse_flow_qos(struct pdr *pdr, struct nlattr *attr)
+{
+    struct nlattr *attrs[GTP5G_FLOW_QOS_ATTR_MAX + 1];
+    struct flow_qos_binding *old_binding;
+    struct flow_qos_binding *new_binding;
+    u32 policy_id;
+    u8 version;
+    u8 flags;
+    int err;
+
+    err = nla_parse_nested(attrs, GTP5G_FLOW_QOS_ATTR_MAX, attr,
+                           flow_qos_policy, NULL);
+    if (err)
+        return err;
+
+    if (!attrs[GTP5G_FLOW_QOS_VERSION] ||
+        !attrs[GTP5G_FLOW_QOS_FLAGS])
+        return -EINVAL;
+
+    version = nla_get_u8(attrs[GTP5G_FLOW_QOS_VERSION]);
+    flags = nla_get_u8(attrs[GTP5G_FLOW_QOS_FLAGS]);
+    if (version != GTP5G_MARK_ABI_VERSION)
+        return -EPROTONOSUPPORT;
+    if (flags & ~GTP5G_FLOW_QOS_VALID)
+        return -EOPNOTSUPP;
+
+    old_binding = rcu_dereference(pdr->flow_qos);
+    if (!(flags & GTP5G_FLOW_QOS_VALID)) {
+        rcu_assign_pointer(pdr->flow_qos, NULL);
+        if (old_binding)
+            kfree_rcu(old_binding, rcu_head);
+        return 0;
+    }
+
+    if (!attrs[GTP5G_FLOW_QOS_POLICY_ID] ||
+        !attrs[GTP5G_FLOW_QOS_TC_CLASSID])
+        return -EINVAL;
+
+    policy_id = nla_get_u32(attrs[GTP5G_FLOW_QOS_POLICY_ID]);
+    if (!gtp5g_qos_policy_id_is_valid(policy_id))
+        return -ERANGE;
+
+    new_binding = kzalloc(sizeof(*new_binding), GFP_ATOMIC);
+    if (!new_binding)
+        return -ENOMEM;
+
+    new_binding->version = version;
+    new_binding->flags = flags;
+    new_binding->policy_id = policy_id;
+    new_binding->tc_classid =
+        nla_get_u32(attrs[GTP5G_FLOW_QOS_TC_CLASSID]);
+    if (attrs[GTP5G_FLOW_QOS_GENERATION])
+        new_binding->generation =
+            nla_get_u32(attrs[GTP5G_FLOW_QOS_GENERATION]);
+
+    rcu_assign_pointer(pdr->flow_qos, new_binding);
+    if (old_binding)
+        kfree_rcu(old_binding, rcu_head);
+
+    return 0;
+}
+
 static int pdr_fill(struct pdr *pdr, struct gtp5g_dev *gtp, struct genl_info *info)
 {
     char *str;
@@ -458,6 +530,11 @@ static int pdr_fill(struct pdr *pdr, struct gtp5g_dev *gtp, struct genl_info *in
             break;
         case GTP5G_PDR_URR_ID:
             err = set_pdr_urr_ids(pdr, nla_get_u32(hdr));
+            if (err)
+                return err;
+            break;
+        case GTP5G_PDR_FLOW_QOS:
+            err = parse_flow_qos(pdr, hdr);
             if (err)
                 return err;
             break;
@@ -1021,6 +1098,8 @@ static int gtp5g_genl_fill_pdr(struct sk_buff *skb, u32 snd_portid, u32 snd_seq,
 {
     void *genlh;
     int i;
+    struct nlattr *nest_flow_qos;
+    struct flow_qos_binding *flow_qos;
 
     genlh = genlmsg_put(skb, snd_portid, snd_seq, &gtp5g_genl_family, 0, type);
     if (!genlh)
@@ -1055,6 +1134,25 @@ static int gtp5g_genl_fill_pdr(struct sk_buff *skb, u32 snd_portid, u32 snd_seq,
     for (i = 0; i < pdr->urr_num; i++) {
         if (nla_put_u32(skb, GTP5G_PDR_URR_ID, pdr->urr_ids[i]))
             goto genlmsg_fail;
+    }
+
+    flow_qos = rcu_dereference(pdr->flow_qos);
+    if (flow_qos) {
+        nest_flow_qos = nla_nest_start(skb, GTP5G_PDR_FLOW_QOS);
+        if (!nest_flow_qos)
+            goto genlmsg_fail;
+
+        if (nla_put_u8(skb, GTP5G_FLOW_QOS_VERSION, flow_qos->version) ||
+            nla_put_u32(skb, GTP5G_FLOW_QOS_POLICY_ID,
+                        flow_qos->policy_id) ||
+            nla_put_u32(skb, GTP5G_FLOW_QOS_TC_CLASSID,
+                        flow_qos->tc_classid) ||
+            nla_put_u8(skb, GTP5G_FLOW_QOS_FLAGS, flow_qos->flags) ||
+            nla_put_u32(skb, GTP5G_FLOW_QOS_GENERATION,
+                        flow_qos->generation))
+            goto genlmsg_fail;
+
+        nla_nest_end(skb, nest_flow_qos);
     }
 
     if (pdr->role_addr_ipv4.s_addr) {

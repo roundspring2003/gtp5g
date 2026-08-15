@@ -18,6 +18,7 @@ static const struct nla_policy gtp5g_genl_pdr_policy[GTP5G_PDR_ATTR_MAX + 1] = {
     [GTP5G_OUTER_HEADER_REMOVAL]                = { .type = NLA_U8, },
     [GTP5G_PDR_FAR_ID]                          = { .type = NLA_U32, },
     [GTP5G_PDR_QER_ID]                          = { .type = NLA_U32, },
+    [GTP5G_PDR_FLOW_QOS]                        = { .type = NLA_NESTED, },
 };
 
 static const struct nla_policy gtp5g_genl_far_policy[GTP5G_FAR_ATTR_MAX + 1] = {

@@ -22,6 +22,7 @@ enum gtp5g_pdr_attrs {
 
     GTP5G_PDR_SEID,
     GTP5G_PDR_URR_ID,
+    GTP5G_PDR_FLOW_QOS,
     /* Add newly supported feature ON ABOVE
      * for compatability with older version of
      * free5GC's UPF or libgtp5gnl
@@ -30,6 +31,19 @@ enum gtp5g_pdr_attrs {
     __GTP5G_PDR_ATTR_MAX,
 };
 #define GTP5G_PDR_ATTR_MAX 16
+
+/* Nest in GTP5G_PDR_FLOW_QOS. */
+enum gtp5g_flow_qos_attrs {
+    GTP5G_FLOW_QOS_UNSPEC,
+    GTP5G_FLOW_QOS_VERSION,
+    GTP5G_FLOW_QOS_POLICY_ID,
+    GTP5G_FLOW_QOS_TC_CLASSID,
+    GTP5G_FLOW_QOS_FLAGS,
+    GTP5G_FLOW_QOS_GENERATION,
+
+    __GTP5G_FLOW_QOS_ATTR_MAX,
+};
+#define GTP5G_FLOW_QOS_ATTR_MAX (__GTP5G_FLOW_QOS_ATTR_MAX - 1)
 
 /* Nest in GTP5G_PDR_PDI */
 enum gtp5g_pdi_attrs {

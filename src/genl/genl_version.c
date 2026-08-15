@@ -1,4 +1,5 @@
 #include "genl_version.h"
+#include "gtp5g_mark.h"
 
 static int gtp5g_genl_fill_ver(struct sk_buff *skb, u32 snd_portid, u32 snd_seq,
         u32 type)
@@ -12,6 +13,9 @@ static int gtp5g_genl_fill_ver(struct sk_buff *skb, u32 snd_portid, u32 snd_seq,
     if (nla_put_string(skb, GTP5G_VERSION, DRV_VERSION))
         goto genlmsg_fail;
 
+    if (nla_put_u8(skb, GTP5G_SHARED_MARK_ABI,
+                   GTP5G_MARK_ABI_VERSION))
+        goto genlmsg_fail;
     genlmsg_end(skb, genlh);
     return 0;
 

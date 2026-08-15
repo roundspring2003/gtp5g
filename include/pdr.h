@@ -61,6 +61,17 @@ struct pdi {
 #define QER_ID_SIZE sizeof(u32)
 #define URR_ID_SIZE sizeof(u32)
 
+#define GTP5G_FLOW_QOS_VALID 0x01
+
+struct flow_qos_binding {
+    u32 policy_id;
+    u32 tc_classid;
+    u32 generation;
+    u8 version;
+    u8 flags;
+    struct rcu_head rcu_head;
+};
+
 struct pdr_node {
     struct hlist_node hlist;
     struct pdr *pdr;
@@ -81,6 +92,7 @@ struct pdr {
     u32 *qer_ids; 
     u32 qer_num;
     u8  qfi;
+    struct flow_qos_binding __rcu *flow_qos;
     struct qer __rcu *qer_with_rate;
     uint8_t ul_dl_gate;
     u32 *urr_ids;
