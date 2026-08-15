@@ -8,6 +8,7 @@
 #include "genl_far.h"
 #include "far.h"
 #include "pktinfo.h"
+#include "gtp5g_mark.h"
 #include "api_version.h"
 
 #include <linux/rculist.h>
@@ -394,6 +395,7 @@ static int forwarding_parameter_fill(struct forwarding_parameter *param,
     struct nlattr *hdr_creation_attrs[GTP5G_OUTER_HEADER_CREATION_ATTR_MAX + 1];
     struct forwarding_policy *fwd_policy;
     uint8_t sendEndmarker = 0;
+    u32 route_id;
     int err;
 
     if (attrs[GTP5G_FORWARDING_PARAMETER_OUTER_HEADER_CREATION]) {
@@ -430,13 +432,20 @@ static int forwarding_parameter_fill(struct forwarding_parameter *param,
         fwd_policy->len = nla_len(attrs[GTP5G_FORWARDING_PARAMETER_FORWARDING_POLICY]);
         if (fwd_policy->len >= sizeof(fwd_policy->identifier))
             return -EINVAL;
-        strncpy(fwd_policy->identifier,
-                nla_data(attrs[GTP5G_FORWARDING_PARAMETER_FORWARDING_POLICY]), fwd_policy->len);
+        memcpy(fwd_policy->identifier,
+               nla_data(attrs[GTP5G_FORWARDING_PARAMETER_FORWARDING_POLICY]),
+               fwd_policy->len);
+        fwd_policy->identifier[fwd_policy->len] = '\0';
 
-        /* Exact value to handle forwarding policy */
-        if (!(fwd_policy->mark = simple_strtol(fwd_policy->identifier, NULL, 10))) {
+        err = kstrtou32(fwd_policy->identifier, 10, &route_id);
+        if (err)
+            return err;
+        if (!route_id)
             return -EINVAL;
-        }
+        if (!gtp5g_route_id_is_valid(route_id))
+            return -ERANGE;
+
+        fwd_policy->route_id = route_id;
     }
 
     if (attrs[GTP5G_FORWARDING_PARAMETER_TOS_TC]) {

@@ -17,6 +17,7 @@
 #include "qer.h"
 #include "urr.h"
 #include "report.h"
+#include "gtp5g_mark.h"
 #include "util.h"
 
 #include "genl.h"
@@ -65,32 +66,35 @@ static u8 gtp5g_pdu_session_qfi(const ext_pdu_sess_ctr_t *pdu_sess)
     }
 }
 
-static void gtp5g_skb_label(u8 qfi, u32 *priority, u32 *mark)
+static void gtp5g_apply_packet_policy(struct sk_buff *skb, struct pdr *pdr,
+    struct far *far, u8 fallback_qfi, bool apply_route_policy)
 {
-    if (!qfi) {
-        *priority = 0;
-        *mark = 0;
-        return;
+    struct flow_qos_binding *flow_qos;
+    struct forwarding_parameter *fwd_param;
+    struct forwarding_policy *fwd_policy;
+    u32 policy_id = fallback_qfi;
+    u32 tc_classid = fallback_qfi;
+    u32 route_id = 0;
+
+    flow_qos = rcu_dereference(pdr->flow_qos);
+    if (flow_qos &&
+        READ_ONCE(flow_qos->version) == GTP5G_MARK_ABI_VERSION &&
+        (READ_ONCE(flow_qos->flags) & GTP5G_FLOW_QOS_VALID)) {
+        policy_id = READ_ONCE(flow_qos->policy_id);
+        tc_classid = READ_ONCE(flow_qos->tc_classid);
     }
 
-    *priority = qfi;
-    *mark = qfi;
-}
+    if (apply_route_policy && far) {
+        fwd_param = rcu_dereference(far->fwd_param);
+        if (fwd_param) {
+            fwd_policy = READ_ONCE(fwd_param->fwd_policy);
+            if (fwd_policy)
+                route_id = READ_ONCE(fwd_policy->route_id);
+        }
+    }
 
-static void gtp5g_apply_skb_label(struct sk_buff *skb, u8 qfi)
-{
-    u32 priority;
-    u32 mark;
-
-    gtp5g_skb_label(qfi, &priority, &mark);
-
-    skb->priority = priority;
-    skb->mark = mark;
-
-    printk(KERN_INFO "gtp5g: qfi=%u priority=%u mark=0x%x ",
-        qfi, priority, mark);
-    // printk(KERN_INFO "after:  skb->priority=%u skb->mark=0x%x\n",
-    //     skb->priority, skb->mark);
+    skb->mark = gtp5g_mark_compose(route_id, policy_id);
+    skb->priority = tc_classid;
 }
 
 /* When gtp5g newlink, establish the udp tunnel used in N3 interface */
@@ -896,7 +900,6 @@ static int gtp5g_fwd_skb_encap(struct sk_buff *skb, struct net_device *dev,
 {
     struct forwarding_parameter *fwd_param = rcu_dereference(far->fwd_param);
     struct outer_header_creation *hdr_creation;
-    struct forwarding_policy *fwd_policy;
     struct gtpv1_hdr *gtp1 = (struct gtpv1_hdr *)(skb->data + sizeof(struct udphdr));
     struct iphdr *iph;
     struct udphdr *uh;
@@ -934,9 +937,6 @@ static int gtp5g_fwd_skb_encap(struct sk_buff *skb, struct net_device *dev,
     }
 
     if (fwd_param) {
-        if ((fwd_policy = fwd_param->fwd_policy))
-            skb->mark = fwd_policy->mark;
-
         if ((hdr_creation = fwd_param->hdr_creation)) {
             // Just modify the teid and packet dest ip
             gtp1->tid = hdr_creation->teid;
@@ -984,6 +984,8 @@ static int gtp5g_fwd_skb_encap(struct sk_buff *skb, struct net_device *dev,
              * ip_xmit() consumes it.
              * */
             *txVol = skb->len;
+            gtp5g_apply_packet_policy(skb, pdr, far,
+                pdr->qfi ? pdr->qfi : qfi, true);
             if (ip_xmit(skb, pdr->sk, dev) < 0) {
                 GTP5G_ERR(dev, "Failed to transmit skb through ip_xmit\n");
                 *txVol = 0;
@@ -1016,7 +1018,8 @@ static int gtp5g_fwd_skb_encap(struct sk_buff *skb, struct net_device *dev,
     skb_reset_network_header(skb);
 
     skb->dev = dev;
-    gtp5g_apply_skb_label(skb, pdr->qfi ? pdr->qfi : qfi);
+    gtp5g_apply_packet_policy(skb, pdr, far,
+        pdr->qfi ? pdr->qfi : qfi, true);
 
     stats = this_cpu_ptr(skb->dev->tstats);
     u64_stats_update_begin(&stats->syncp);
@@ -1155,14 +1158,8 @@ static int gtp5g_fwd_skb_ipv4(struct sk_buff *skb,
         volume = volume_mbqe;
     }
 
-    // gtp5g_apply_skb_label(skb, pdr->qfi);
     gtp5g_push_header(skb, pktinfo);
-    gtp5g_apply_skb_label(skb, pdr->qfi);
-    printk(KERN_INFO
-        "src=%pI4 dst=%pI4 pdr_id=%u\n",
-        &iph->saddr,
-        &iph->daddr,
-        pdr->id);
+    gtp5g_apply_packet_policy(skb, pdr, far, pdr->qfi, false);
 
     if (pdr->urr_num != 0) {
         if (update_urr_counter_and_send_report(pdr, far, volume, volume_mbqe) < 0)

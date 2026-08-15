@@ -7,6 +7,7 @@
 #include "log.h"
 #include "pdr.h"
 #include "far.h"
+#include "gtp5g_mark.h"
 
 #include "util.h"
 
@@ -25,6 +26,15 @@ struct proc_gtp5g_pdr {
     u32     far_id;
     u32     *qer_ids;
     u32     qer_num;
+
+    u8      qfi;
+    u8      flow_qos_version;
+    u8      flow_qos_flags;
+    u8      route_id;
+    u32     flow_qos_policy_id;
+    u32     flow_qos_tc_classid;
+    u32     flow_qos_generation;
+    u32     composed_mark;
 
     u32     *urr_ids;
     u32     urr_num;
@@ -48,6 +58,8 @@ struct proc_gtp5g_far {
     u16     description;
     u32     teid; 
     u32     peer_addr4;
+    u8      route_id;
+    char    forwarding_policy[0xff + 1];
 };
 
 struct proc_gtp5g_qer {
@@ -207,6 +219,16 @@ static int gtp5g_pdr_read(struct seq_file *s, void *v)
     seq_printf(s, "\t FAR ID: %u\n", proc_pdr.far_id);
     set_pdr_qer_ids(pdr_qer_ids, &proc_pdr);
     seq_printf(s, "\t QER IDs: %s\n", pdr_qer_ids);
+    seq_printf(s, "\t QFI: %u\n", proc_pdr.qfi);
+    seq_printf(s, "\t FlowQoS Version: %u\n", proc_pdr.flow_qos_version);
+    seq_printf(s, "\t FlowQoS Flags: %#x\n", proc_pdr.flow_qos_flags);
+    seq_printf(s, "\t FlowQoS Policy ID: %u\n", proc_pdr.flow_qos_policy_id);
+    seq_printf(s, "\t FlowQoS TC Classid: %#08x\n",
+               proc_pdr.flow_qos_tc_classid);
+    seq_printf(s, "\t FlowQoS Generation: %u\n",
+               proc_pdr.flow_qos_generation);
+    seq_printf(s, "\t Route ID: %u\n", proc_pdr.route_id);
+    seq_printf(s, "\t N6/N9 Composed Mark: %#08x\n", proc_pdr.composed_mark);
     set_pdr_urr_ids(pdr_urr_ids, &proc_pdr);
     seq_printf(s, "\t URR IDs: %s\n", pdr_urr_ids);
     seq_printf(s, "\t UL Drop Count: %#llx\n", proc_pdr.ul_drop_cnt);
@@ -232,6 +254,8 @@ static int gtp5g_far_read(struct seq_file *s, void *v)
     seq_printf(s, "\t OHC Description: %#x\n", proc_far.description);
     seq_printf(s, "\t OHC TEID : %#08x\n", ntohl(proc_far.teid));
     seq_printf(s, "\t OHC Peer Addr4: %#08x\n", ntohl(proc_far.peer_addr4));
+    seq_printf(s, "\t Forwarding Policy: %s\n", proc_far.forwarding_policy);
+    seq_printf(s, "\t Route ID: %u\n", proc_far.route_id);
     return 0;
 }
 
@@ -352,6 +376,10 @@ static ssize_t proc_pdr_write(struct file *filp, const char __user *buffer,
     unsigned long buf_len = min(sizeof(buf) - 1, len);
     struct pdr *pdr;
     struct gtp5g_dev *gtp;
+    struct flow_qos_binding *flow_qos;
+    struct forwarding_parameter *fwd_param;
+    struct forwarding_policy *fwd_policy;
+    struct far *far;
 
     if (copy_from_user(buf, buffer, buf_len)) {
         GTP5G_ERR(NULL, "Failed to read buffer: %s\n", buf);
@@ -408,6 +436,31 @@ static ssize_t proc_pdr_write(struct file *filp, const char __user *buffer,
         proc_pdr.qer_ids = pdr->qer_ids;
         proc_pdr.qer_num = pdr->qer_num;
     }
+
+    proc_pdr.qfi = pdr->qfi;
+    proc_pdr.flow_qos_policy_id = pdr->qfi;
+    proc_pdr.flow_qos_tc_classid = pdr->qfi;
+
+    flow_qos = rcu_dereference(pdr->flow_qos);
+    if (flow_qos) {
+        proc_pdr.flow_qos_version = READ_ONCE(flow_qos->version);
+        proc_pdr.flow_qos_flags = READ_ONCE(flow_qos->flags);
+        proc_pdr.flow_qos_policy_id = READ_ONCE(flow_qos->policy_id);
+        proc_pdr.flow_qos_tc_classid = READ_ONCE(flow_qos->tc_classid);
+        proc_pdr.flow_qos_generation = READ_ONCE(flow_qos->generation);
+    }
+
+    far = rcu_dereference(pdr->far);
+    if (far) {
+        fwd_param = rcu_dereference(far->fwd_param);
+        if (fwd_param) {
+            fwd_policy = READ_ONCE(fwd_param->fwd_policy);
+            if (fwd_policy)
+                proc_pdr.route_id = READ_ONCE(fwd_policy->route_id);
+        }
+    }
+    proc_pdr.composed_mark = gtp5g_mark_compose(
+        proc_pdr.route_id, proc_pdr.flow_qos_policy_id);
 
     if (pdr->urr_ids) {
         proc_pdr.urr_ids = pdr->urr_ids;
@@ -477,6 +530,12 @@ static ssize_t proc_far_write(struct file *filp, const char __user *buffer,
             proc_far.description = fwd_param->hdr_creation->description;
             proc_far.teid = fwd_param->hdr_creation->teid;
             proc_far.peer_addr4 = fwd_param->hdr_creation->peer_addr_ipv4.s_addr;
+        }
+        if (fwd_param->fwd_policy) {
+            proc_far.route_id = fwd_param->fwd_policy->route_id;
+            strscpy(proc_far.forwarding_policy,
+                    fwd_param->fwd_policy->identifier,
+                    sizeof(proc_far.forwarding_policy));
         }
     }
 

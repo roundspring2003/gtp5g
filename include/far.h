@@ -34,8 +34,8 @@ struct outer_header_creation {
 struct forwarding_policy {
     int len;
     char identifier[0xff + 1];
-    /* Exact value to handle forwarding policy */
-    u32 mark;
+    /* Route field encoded into the shared skb mark ABI. */
+    u8 route_id;
 };
 
 struct forwarding_parameter {
