@@ -100,10 +100,11 @@ The downlink N3 path deliberately does not apply the FAR route ID to the outer
 packet destined for the RAN. This preserves the forwarding-policy scope used
 by the prior implementation.
 
-Until go-upf publishes `GTP5G_PDR_FLOW_QOS`, the packet path uses QFI as a
-legacy fallback for both the low mark field and `skb->priority`. This keeps the
-current QFI-based experiment working, but it is not MBR/GBR enforcement and
-must be removed after the control-plane integration is deployed.
+Without a valid `GTP5G_PDR_FLOW_QOS` binding, the FlowQoS policy ID and TC
+classid are both zero. QFI is never copied into `skb->mark` or
+`skb->priority`; it is used only as the 5G protocol value in the GTP-U PDU
+Session Container. User space must publish the binding before expecting TC
+classification or scheduling.
 
 ## Validation contract
 

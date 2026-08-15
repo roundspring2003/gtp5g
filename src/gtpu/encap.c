@@ -67,13 +67,13 @@ static u8 gtp5g_pdu_session_qfi(const ext_pdu_sess_ctr_t *pdu_sess)
 }
 
 static void gtp5g_apply_packet_policy(struct sk_buff *skb, struct pdr *pdr,
-    struct far *far, u8 fallback_qfi, bool apply_route_policy)
+    struct far *far, bool apply_route_policy)
 {
     struct flow_qos_binding *flow_qos;
     struct forwarding_parameter *fwd_param;
     struct forwarding_policy *fwd_policy;
-    u32 policy_id = fallback_qfi;
-    u32 tc_classid = fallback_qfi;
+    u32 policy_id = 0;
+    u32 tc_classid = 0;
     u32 route_id = 0;
 
     flow_qos = rcu_dereference(pdr->flow_qos);
@@ -984,8 +984,7 @@ static int gtp5g_fwd_skb_encap(struct sk_buff *skb, struct net_device *dev,
              * ip_xmit() consumes it.
              * */
             *txVol = skb->len;
-            gtp5g_apply_packet_policy(skb, pdr, far,
-                pdr->qfi ? pdr->qfi : qfi, true);
+            gtp5g_apply_packet_policy(skb, pdr, far, true);
             if (ip_xmit(skb, pdr->sk, dev) < 0) {
                 GTP5G_ERR(dev, "Failed to transmit skb through ip_xmit\n");
                 *txVol = 0;
@@ -1018,8 +1017,7 @@ static int gtp5g_fwd_skb_encap(struct sk_buff *skb, struct net_device *dev,
     skb_reset_network_header(skb);
 
     skb->dev = dev;
-    gtp5g_apply_packet_policy(skb, pdr, far,
-        pdr->qfi ? pdr->qfi : qfi, true);
+    gtp5g_apply_packet_policy(skb, pdr, far, true);
 
     stats = this_cpu_ptr(skb->dev->tstats);
     u64_stats_update_begin(&stats->syncp);
@@ -1159,7 +1157,7 @@ static int gtp5g_fwd_skb_ipv4(struct sk_buff *skb,
     }
 
     gtp5g_push_header(skb, pktinfo);
-    gtp5g_apply_packet_policy(skb, pdr, far, pdr->qfi, false);
+    gtp5g_apply_packet_policy(skb, pdr, far, false);
 
     if (pdr->urr_num != 0) {
         if (update_urr_counter_and_send_report(pdr, far, volume, volume_mbqe) < 0)

@@ -438,8 +438,6 @@ static ssize_t proc_pdr_write(struct file *filp, const char __user *buffer,
     }
 
     proc_pdr.qfi = pdr->qfi;
-    proc_pdr.flow_qos_policy_id = pdr->qfi;
-    proc_pdr.flow_qos_tc_classid = pdr->qfi;
 
     flow_qos = rcu_dereference(pdr->flow_qos);
     if (flow_qos) {
