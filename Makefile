@@ -82,6 +82,10 @@ default: module
 
 module:
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
+
+test:
+	$(MAKE) -C tests run
+
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
@@ -98,3 +102,5 @@ uninstall:
 	$(DEPMOD)
 	rm -f /etc/modules-load.d/gtp5g.conf
 	rmmod -f  $(MODULE_NAME)
+
+.PHONY: default module test clean install uninstall
