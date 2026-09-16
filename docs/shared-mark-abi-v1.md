@@ -6,7 +6,16 @@ The kernel runtime implements shared mark ABI v1. PDRs can carry an RCU-safe
 FlowQoS binding, decimal FAR Forwarding Policy Identifiers are validated as
 8-bit route IDs, and the N6, N9 and downlink N3 paths use one helper to set the
 packet metadata. go-upf/go-gtp5gnl support for publishing the new PDR attribute
-is the next integration step.
+must use the stable PDR attribute numbers documented below. The companion
+go-upf branch `feat/qos-manager-egress` publishes PDR bindings; its egress BPF
+class selection and EDT backend remain future integration work.
+
+Binding-only PDR REPLACE requests (identity attributes plus FLOW_QOS) bypass
+the general PDR refresh path. Validation/allocation errors preserve the existing
+PDR and binding. Mixed PFCP/binding updates still use the existing PDR update
+semantics. The companion UPF sends TC_CLASSID=0; egress BPF will own the final
+classid. This does not change the wire ABI or remove support for other clients'
+nonzero TC_CLASSID values.
 
 `GTP5G_CMD_GET_VERSION` also returns `GTP5G_SHARED_MARK_ABI = 1` so user space
 can require this capability before publishing FlowQoS bindings. The existing
@@ -68,8 +77,17 @@ protocol value used in the GTP-U PDU Session Container.
 
 ## PDR FlowQoS netlink binding
 
-`GTP5G_PDR_FLOW_QOS` is appended to the PDR Generic Netlink attributes. It is
-a nested attribute with this contract:
+The outer PDR attribute numbers are a stable user/kernel ABI. Attribute 13 was
+already assigned to `GTP5G_PDR_PDN_TYPE` by go-gtp5gnl, even though this kernel
+module does not currently consume it. FlowQoS therefore uses the next free
+number:
+
+| PDR attribute | Number | Purpose |
+|---|---:|---|
+| `GTP5G_PDR_PDN_TYPE` | 13 | Existing user-space ABI; reserved here |
+| `GTP5G_PDR_FLOW_QOS` | 14 | Nested FlowQoS binding |
+
+`GTP5G_PDR_FLOW_QOS` is a nested attribute with this contract:
 
 | Nested attribute | Type | Meaning |
 |---|---|---|

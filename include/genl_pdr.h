@@ -6,23 +6,33 @@
 enum gtp5g_pdr_attrs {
     /* gtp5g_device_attrs in this part */
 
+    /*
+     * These values are part of the user-space ABI. Keep existing values
+     * stable and assign new attributes explicitly instead of relying on
+     * enum auto-increment.
+     */
+
     GTP5G_PDR_ID = 3,
-    GTP5G_PDR_PRECEDENCE,
-    GTP5G_PDR_PDI,
-    GTP5G_OUTER_HEADER_REMOVAL,
-    GTP5G_PDR_FAR_ID,
+    GTP5G_PDR_PRECEDENCE = 4,
+    GTP5G_PDR_PDI = 5,
+    GTP5G_OUTER_HEADER_REMOVAL = 6,
+    GTP5G_PDR_FAR_ID = 7,
 
     /* Not in 3GPP spec, just used for routing */
-    GTP5G_PDR_ROLE_ADDR_IPV4,
+    GTP5G_PDR_ROLE_ADDR_IPV4 = 8,
 
     /* Not in 3GPP spec, just used for buffering */
-    GTP5G_PDR_UNIX_SOCKET_PATH,
+    GTP5G_PDR_UNIX_SOCKET_PATH = 9,
 
-    GTP5G_PDR_QER_ID,
+    GTP5G_PDR_QER_ID = 10,
 
-    GTP5G_PDR_SEID,
-    GTP5G_PDR_URR_ID,
-    GTP5G_PDR_FLOW_QOS,
+    GTP5G_PDR_SEID = 11,
+    GTP5G_PDR_URR_ID = 12,
+
+    /* Reserved by the existing go-gtp5gnl PDR ABI. */
+    GTP5G_PDR_PDN_TYPE = 13,
+
+    GTP5G_PDR_FLOW_QOS = 14,
     /* Add newly supported feature ON ABOVE
      * for compatability with older version of
      * free5GC's UPF or libgtp5gnl

@@ -34,6 +34,33 @@ static int gtp5g_genl_fill_pdi(struct sk_buff *, struct pdi *);
 static int gtp5g_genl_fill_pdr(struct sk_buff *, u32, u32, u32, struct pdr *);
 static int parse_framed_routes(struct pdr *, struct pdi *, struct nlattr *);
 
+/* Only identity attributes may accompany a binding-only update. Do not run
+ * pdr_fill(): it refreshes unrelated rule state and deletes the PDR on error.
+ */
+static bool is_flow_qos_only_update(struct genl_info *info)
+{
+    struct nlattr *attr;
+    int remaining;
+
+    if (!info->attrs[GTP5G_PDR_FLOW_QOS])
+        return false;
+
+    nla_for_each_attr(attr, nlmsg_attrdata(info->nlhdr, GENL_HDRLEN),
+                      nlmsg_attrlen(info->nlhdr, GENL_HDRLEN), remaining) {
+        switch (nla_type(attr)) {
+        case GTP5G_LINK:
+        case GTP5G_NET_NS_FD:
+        case GTP5G_PDR_ID:
+        case GTP5G_PDR_SEID:
+        case GTP5G_PDR_FLOW_QOS:
+            break;
+        default:
+            return false;
+        }
+    }
+    return remaining == 0;
+}
+
 int gtp5g_genl_add_pdr(struct sk_buff *skb, struct genl_info *info)
 {
     struct gtp5g_dev *gtp;
@@ -70,7 +97,7 @@ int gtp5g_genl_add_pdr(struct sk_buff *skb, struct genl_info *info)
     }
 
     if (info->attrs[GTP5G_PDR_ID]) {
-        pdr_id = nla_get_u32(info->attrs[GTP5G_PDR_ID]);
+        pdr_id = nla_get_u16(info->attrs[GTP5G_PDR_ID]);
     } else {
         err = -ENODEV;
         goto out;
@@ -84,6 +111,11 @@ int gtp5g_genl_add_pdr(struct sk_buff *skb, struct genl_info *info)
         }
         if (!(info->nlhdr->nlmsg_flags & NLM_F_REPLACE)) {
             err = -EOPNOTSUPP;
+            goto out;
+        }
+
+        if (is_flow_qos_only_update(info)) {
+            err = parse_flow_qos(pdr, info->attrs[GTP5G_PDR_FLOW_QOS]);
             goto out;
         }
 
@@ -532,6 +564,12 @@ static int pdr_fill(struct pdr *pdr, struct gtp5g_dev *gtp, struct genl_info *in
             err = set_pdr_urr_ids(pdr, nla_get_u32(hdr));
             if (err)
                 return err;
+            break;
+        case GTP5G_PDR_PDN_TYPE:
+            /*
+             * Reserved for the existing user-space ABI. The kernel packet
+             * path does not currently need the PDN type value.
+             */
             break;
         case GTP5G_PDR_FLOW_QOS:
             err = parse_flow_qos(pdr, hdr);
