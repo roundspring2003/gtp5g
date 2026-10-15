@@ -432,7 +432,6 @@ static int set_pdr_urr_ids(struct pdr *pdr, u32 urr_id)
 static const struct nla_policy flow_qos_policy[GTP5G_FLOW_QOS_ATTR_MAX + 1] = {
     [GTP5G_FLOW_QOS_VERSION] = { .type = NLA_U8 },
     [GTP5G_FLOW_QOS_POLICY_ID] = { .type = NLA_U32 },
-    [GTP5G_FLOW_QOS_TC_CLASSID] = { .type = NLA_U32 },
     [GTP5G_FLOW_QOS_FLAGS] = { .type = NLA_U8 },
     [GTP5G_FLOW_QOS_GENERATION] = { .type = NLA_U32 },
 };
@@ -458,7 +457,7 @@ static int parse_flow_qos(struct pdr *pdr, struct nlattr *attr)
 
     version = nla_get_u8(attrs[GTP5G_FLOW_QOS_VERSION]);
     flags = nla_get_u8(attrs[GTP5G_FLOW_QOS_FLAGS]);
-    if (version != GTP5G_MARK_ABI_VERSION)
+    if (version != GTP5G_FLOW_QOS_BINDING_VERSION)
         return -EPROTONOSUPPORT;
     if (flags & ~GTP5G_FLOW_QOS_VALID)
         return -EOPNOTSUPP;
@@ -471,8 +470,7 @@ static int parse_flow_qos(struct pdr *pdr, struct nlattr *attr)
         return 0;
     }
 
-    if (!attrs[GTP5G_FLOW_QOS_POLICY_ID] ||
-        !attrs[GTP5G_FLOW_QOS_TC_CLASSID])
+    if (!attrs[GTP5G_FLOW_QOS_POLICY_ID])
         return -EINVAL;
 
     policy_id = nla_get_u32(attrs[GTP5G_FLOW_QOS_POLICY_ID]);
@@ -486,8 +484,6 @@ static int parse_flow_qos(struct pdr *pdr, struct nlattr *attr)
     new_binding->version = version;
     new_binding->flags = flags;
     new_binding->policy_id = policy_id;
-    new_binding->tc_classid =
-        nla_get_u32(attrs[GTP5G_FLOW_QOS_TC_CLASSID]);
     if (attrs[GTP5G_FLOW_QOS_GENERATION])
         new_binding->generation =
             nla_get_u32(attrs[GTP5G_FLOW_QOS_GENERATION]);
@@ -1183,8 +1179,6 @@ static int gtp5g_genl_fill_pdr(struct sk_buff *skb, u32 snd_portid, u32 snd_seq,
         if (nla_put_u8(skb, GTP5G_FLOW_QOS_VERSION, flow_qos->version) ||
             nla_put_u32(skb, GTP5G_FLOW_QOS_POLICY_ID,
                         flow_qos->policy_id) ||
-            nla_put_u32(skb, GTP5G_FLOW_QOS_TC_CLASSID,
-                        flow_qos->tc_classid) ||
             nla_put_u8(skb, GTP5G_FLOW_QOS_FLAGS, flow_qos->flags) ||
             nla_put_u32(skb, GTP5G_FLOW_QOS_GENERATION,
                         flow_qos->generation))

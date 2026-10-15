@@ -32,7 +32,6 @@ struct proc_gtp5g_pdr {
     u8      flow_qos_flags;
     u8      route_id;
     u32     flow_qos_policy_id;
-    u32     flow_qos_tc_classid;
     u32     flow_qos_generation;
     u32     composed_mark;
 
@@ -223,8 +222,6 @@ static int gtp5g_pdr_read(struct seq_file *s, void *v)
     seq_printf(s, "\t FlowQoS Version: %u\n", proc_pdr.flow_qos_version);
     seq_printf(s, "\t FlowQoS Flags: %#x\n", proc_pdr.flow_qos_flags);
     seq_printf(s, "\t FlowQoS Policy ID: %u\n", proc_pdr.flow_qos_policy_id);
-    seq_printf(s, "\t FlowQoS TC Classid: %#08x\n",
-               proc_pdr.flow_qos_tc_classid);
     seq_printf(s, "\t FlowQoS Generation: %u\n",
                proc_pdr.flow_qos_generation);
     seq_printf(s, "\t Route ID: %u\n", proc_pdr.route_id);
@@ -444,7 +441,6 @@ static ssize_t proc_pdr_write(struct file *filp, const char __user *buffer,
         proc_pdr.flow_qos_version = READ_ONCE(flow_qos->version);
         proc_pdr.flow_qos_flags = READ_ONCE(flow_qos->flags);
         proc_pdr.flow_qos_policy_id = READ_ONCE(flow_qos->policy_id);
-        proc_pdr.flow_qos_tc_classid = READ_ONCE(flow_qos->tc_classid);
         proc_pdr.flow_qos_generation = READ_ONCE(flow_qos->generation);
     }
 

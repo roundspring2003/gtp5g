@@ -62,10 +62,10 @@ struct pdi {
 #define URR_ID_SIZE sizeof(u32)
 
 #define GTP5G_FLOW_QOS_VALID 0x01
+#define GTP5G_FLOW_QOS_BINDING_VERSION 2U
 
 struct flow_qos_binding {
     u32 policy_id;
-    u32 tc_classid;
     u32 generation;
     u8 version;
     u8 flags;

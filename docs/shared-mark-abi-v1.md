@@ -2,23 +2,22 @@
 
 ## Status
 
-The kernel runtime implements shared mark ABI v1. PDRs can carry an RCU-safe
+The kernel runtime implements shared mark ABI v1 and FlowQoS binding v2. PDRs can carry an RCU-safe
 FlowQoS binding, decimal FAR Forwarding Policy Identifiers are validated as
 8-bit route IDs, and the N6, N9 and downlink N3 paths use one helper to set the
 packet metadata. go-upf/go-gtp5gnl support for publishing the new PDR attribute
 must use the stable PDR attribute numbers documented below. The companion
-go-upf branch `feat/qos-manager-egress` publishes PDR bindings; its egress BPF
-class selection and EDT backend remain future integration work.
+go-upf branch `feat/qos-manager-egress` publishes PDR bindings and uses egress BPF
+for class selection.
 
 Binding-only PDR REPLACE requests (identity attributes plus FLOW_QOS) bypass
 the general PDR refresh path. Validation/allocation errors preserve the existing
 PDR and binding. Mixed PFCP/binding updates still use the existing PDR update
-semantics. The companion UPF sends TC_CLASSID=0; egress BPF will own the final
-classid. This does not change the wire ABI or remove support for other clients'
-nonzero TC_CLASSID values.
+semantics. FlowQoS binding v2 carries a policy ID; egress BPF selects the TC
+class from its policy map.
 
-`GTP5G_CMD_GET_VERSION` also returns `GTP5G_SHARED_MARK_ABI = 1` so user space
-can require this capability before publishing FlowQoS bindings. The existing
+`GTP5G_CMD_GET_VERSION` returns `GTP5G_SHARED_MARK_ABI = 1` for the mark
+layout. This value does not identify the FlowQoS binding version. The existing
 driver-version attribute and its number are unchanged.
 
 ## Layout
@@ -71,8 +70,8 @@ TC/eBPF must only use the FlowQoS field as its policy-map key:
 policy_id = skb->mark & GTP5G_QOS_MARK_MASK;
 ```
 
-`skb->priority` is not part of this bit layout. When a valid FlowQoS binding is
-present it carries the complete Linux TC classid. QFI remains a separate 5G
+`skb->priority` is not part of this bit layout. gtp5g leaves it unchanged;
+egress BPF sets the complete Linux TC classid. QFI remains a separate 5G
 protocol value used in the GTP-U PDU Session Container.
 
 ## PDR FlowQoS netlink binding
@@ -91,14 +90,14 @@ number:
 
 | Nested attribute | Type | Meaning |
 |---|---|---|
-| `GTP5G_FLOW_QOS_VERSION` | `u8` | Must equal `1` |
+| `GTP5G_FLOW_QOS_VERSION` | `u8` | Must equal `2`; distinct from the mark ABI version |
 | `GTP5G_FLOW_QOS_POLICY_ID` | `u32` | Low 24-bit policy-map key |
-| `GTP5G_FLOW_QOS_TC_CLASSID` | `u32` | Complete Linux TC classid |
 | `GTP5G_FLOW_QOS_FLAGS` | `u8` | Bit 0 is `GTP5G_FLOW_QOS_VALID` |
 | `GTP5G_FLOW_QOS_GENERATION` | `u32` | Control-plane generation |
 
-Version and flags are mandatory. A valid binding also requires policy ID and
-TC classid. Sending flags `0` clears an existing binding. Create, replace,
+Attribute number 3 is reserved so the remaining attribute numbers do not change.
+Version and flags are mandatory. A valid binding also requires policy ID.
+Sending flags `0` clears an existing binding. Create, replace,
 get and dump PDR operations use the same nested representation. Unsupported
 versions, unknown flags and policy IDs above `0x00ffffff` are rejected.
 
@@ -108,7 +107,7 @@ observe fields from two different generations.
 
 ## Packet paths
 
-| Path | Route field | FlowQoS field and classid | Write point |
+| Path | Route field | FlowQoS policy ID | Write point |
 |---|---|---|---|
 | uplink N3 to N6 | FAR route ID | PDR binding | after decapsulation |
 | uplink N9 forwarding | FAR route ID | PDR binding | before `ip_xmit()` |
@@ -118,8 +117,8 @@ The downlink N3 path deliberately does not apply the FAR route ID to the outer
 packet destined for the RAN. This preserves the forwarding-policy scope used
 by the prior implementation.
 
-Without a valid `GTP5G_PDR_FLOW_QOS` binding, the FlowQoS policy ID and TC
-classid are both zero. QFI is never copied into `skb->mark` or
+Without a valid `GTP5G_PDR_FLOW_QOS` binding, the FlowQoS policy ID is zero.
+QFI is never copied into `skb->mark` or
 `skb->priority`; it is used only as the 5G protocol value in the GTP-U PDU
 Session Container. User space must publish the binding before expecting TC
 classification or scheduling.

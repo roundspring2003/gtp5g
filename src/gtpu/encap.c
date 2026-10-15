@@ -73,15 +73,13 @@ static void gtp5g_apply_packet_policy(struct sk_buff *skb, struct pdr *pdr,
     struct forwarding_parameter *fwd_param;
     struct forwarding_policy *fwd_policy;
     u32 policy_id = 0;
-    u32 tc_classid = 0;
     u32 route_id = 0;
 
     flow_qos = rcu_dereference(pdr->flow_qos);
     if (flow_qos &&
-        READ_ONCE(flow_qos->version) == GTP5G_MARK_ABI_VERSION &&
+        READ_ONCE(flow_qos->version) == GTP5G_FLOW_QOS_BINDING_VERSION &&
         (READ_ONCE(flow_qos->flags) & GTP5G_FLOW_QOS_VALID)) {
         policy_id = READ_ONCE(flow_qos->policy_id);
-        tc_classid = READ_ONCE(flow_qos->tc_classid);
     }
 
     if (apply_route_policy && far) {
@@ -94,7 +92,6 @@ static void gtp5g_apply_packet_policy(struct sk_buff *skb, struct pdr *pdr,
     }
 
     skb->mark = gtp5g_mark_compose(route_id, policy_id);
-    skb->priority = tc_classid;
 }
 
 /* When gtp5g newlink, establish the udp tunnel used in N3 interface */
